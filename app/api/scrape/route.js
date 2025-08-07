@@ -78,7 +78,7 @@ async function scrapeListingPage(page = 1) {
     const url = `https://minutes.noon.com/uae-en/search/?f[category]=fruits_vegetables&page=${page}`;
     const { data } = await axios.get(url, {
       headers: { "User-Agent": "Mozilla/5.0" },
-      timeout: 10000,
+      timeout: 1000000,
     });
     const $ = cheerio.load(data);
     const ids = [];
