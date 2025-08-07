@@ -4,7 +4,7 @@ async function fetchProductDetails(productId) {
   try {
     const productUrl = `https://minutes.noon.com/uae-en/now-product/${productId}/`;
     const response = await fetch(productUrl);
-    console.log(">>>> Debug response1:", response);
+    console.log(">>>> Debug response1:;", response);
     const data = await response.text();
     const $ = cheerio.load(data);
 
