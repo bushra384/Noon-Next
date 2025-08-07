@@ -31,11 +31,16 @@ async function fetchProductDetails(productId) {
     };
 
     // ✅ Extract product name
-    const title = $('h1, .product-title, [data-testid*="title"]').first().text().trim();
+    const title = $('h1, .product-title, [data-testid*="title"]')
+      .first()
+      .text()
+      .trim();
     productInfo.productName = title || `Product ${productId}`;
 
     // ✅ Extract price
-    const priceElement = $('span:contains("AED"), span:contains("د.إ")').first();
+    const priceElement = $(
+      'span:contains("AED"), span:contains("د.إ")'
+    ).first();
     if (priceElement.length) {
       const text = priceElement.text().trim();
       const priceMatch = text.match(/[\d.,]+/);
@@ -53,14 +58,20 @@ async function fetchProductDetails(productId) {
 
     return {
       productUrl: productInfo.productUrl,
-      images: productInfo.images.length ? productInfo.images : [PLACEHOLDER_IMG],
+      images: productInfo.images.length
+        ? productInfo.images
+        : [PLACEHOLDER_IMG],
       productName: productInfo.productName,
-      price: productInfo.price ? `${productInfo.currency} ${productInfo.price}` : "AED 0.00",
+      price: productInfo.price
+        ? `${productInfo.currency} ${productInfo.price}`
+        : "AED 0.00",
       weight: productInfo.size || "",
       country: productInfo.origin || "",
     };
   } catch (error) {
-    console.error(`Error fetching product details for ${productId}: ${error.message}`);
+    console.error(
+      `Error fetching product details for ${productId}: ${error.message}`
+    );
     return {
       productUrl: `https://minutes.noon.com/uae-en/now-product/${productId}/`,
       images: [PLACEHOLDER_IMG],
@@ -78,8 +89,9 @@ async function scrapeListingPage(page = 1) {
     const url = `https://minutes.noon.com/uae-en/search/?f[category]=fruits_vegetables&page=${page}`;
     const { data } = await axios.get(url, {
       headers: { "User-Agent": "Mozilla/5.0" },
-      timeout: 1000000,
+      timeout: 10000,
     });
+    console.log("Fetched HTML snippet:", data.slice(0, 500));
     const $ = cheerio.load(data);
     const ids = [];
     $('a[href*="/now-product/"]').each((i, el) => {
@@ -114,8 +126,12 @@ export async function GET(request) {
     }
 
     const paginatedIds = productIds.slice(0, limit);
-    const results = await Promise.allSettled(paginatedIds.map(id => fetchProductDetails(id)));
-    const products = results.filter(r => r.status === "fulfilled").map(r => r.value);
+    const results = await Promise.allSettled(
+      paginatedIds.map((id) => fetchProductDetails(id))
+    );
+    const products = results
+      .filter((r) => r.status === "fulfilled")
+      .map((r) => r.value);
 
     return new Response(
       JSON.stringify({
