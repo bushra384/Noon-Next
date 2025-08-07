@@ -1,22 +1,29 @@
-// app/api/products/route.js
+// app/api/scrape/route.js
+
 import * as cheerio from "cheerio";
 
-// Add headers to avoid being blocked
-const fetchWithHeaders = async (url) => {
-  return await fetch(url, {
-    headers: {
-      "User-Agent":
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
-    },
-  });
-};
+const API_KEY = "K6EQ1YS3N0UTBMNE0BD93DO6JULUSAX9PWHYAXFW19DRJTH6HNXVQZ0OWLREW2D0GYQB10T8MPPYGL0Y";
+const BASE_URL = "https://minutes.noon.com/uae-en";
+
+async function fetchWithScrapingBee(targetUrl, renderJs = false) {
+  const scrapingBeeUrl = `https://app.scrapingbee.com/api/v1/?api_key=${API_KEY}&url=${encodeURIComponent(
+    targetUrl
+  )}&render_js=${renderJs ? "true" : "false"}&block_resources=true`;
+
+  const response = await fetch(scrapingBeeUrl);
+  if (!response.ok) {
+    throw new Error(`ScrapingBee failed: ${response.status}`);
+  }
+
+  return await response.text();
+}
 
 async function fetchProductDetails(productId) {
   try {
-    const productUrl = `https://minutes.noon.com/uae-en/now-product/${productId}/`;
-    const response = await fetchWithHeaders(productUrl);
-    const html = await response.text();
-    const $ = cheerio.load(html);
+    const productUrl = `${BASE_URL}/now-product/${productId}/`;
+    const data = await fetchWithScrapingBee(productUrl);
+
+    const $ = cheerio.load(data);
 
     const productInfo = {
       productId,
@@ -31,13 +38,13 @@ async function fetchProductDetails(productId) {
       description: "",
     };
 
-    $('h1, .product-title, [data-testid*="title"]').each((i, el) => {
+    $('h1, .product-title, [data-testid*="title"]').each((_, el) => {
       const text = $(el).text().trim();
       if (text && !productInfo.productName) {
         if (text.includes("'s")) {
           const parts = text.split("'s");
           productInfo.brand = parts[0].trim();
-          productInfo.productName = parts[1]?.trim() || text;
+          productInfo.productName = parts[1] ? parts[1].trim() : text;
         } else {
           productInfo.productName = text;
         }
@@ -89,39 +96,46 @@ async function fetchProductDetails(productId) {
     });
 
     return productInfo;
-  } catch (err) {
-    console.error("fetchProductDetails error:", err.message);
+  } catch (error) {
+    console.error(`Error fetching product details for ${productId}:`, error.message);
     return null;
   }
 }
 
-async function scrapeOneListingPage(page = 1) {
-  const url = `https://minutes.noon.com/uae-en/search/?f[category]=fruits_vegetables&page=${page}`;
-  const response = await fetchWithHeaders(url);
-  const html = await response.text();
-  const $ = cheerio.load(html);
+async function scrapeAllListingPages() {
+  const allProductIds = new Set();
+  const totalPages = 5;
 
-  const productIds = new Set();
+  for (let page = 1; page <= totalPages; page++) {
+    try {
+      const listingUrl = `${BASE_URL}/search/?f[category]=fruits_vegetables&page=${page}`;
+      const html = await fetchWithScrapingBee(listingUrl);
+      const $ = cheerio.load(html);
 
-  $('a[href*="/now-product/"]').each((_, el) => {
-    const href = $(el).attr("href");
-    const match = href?.match(/\/now-product\/([^\/]+)/);
-    if (match) productIds.add(match[1]);
-  });
+      $('a[href*="/now-product/"]').each((_, el) => {
+        const href = $(el).attr("href");
+        const match = href?.match(/\/now-product\/([^\/]+)/);
+        if (match) allProductIds.add(match[1]);
+      });
+    } catch (error) {
+      console.error(`Error scraping page ${page}:`, error);
+    }
+  }
 
-  return Array.from(productIds);
+  return Array.from(allProductIds);
 }
 
-async function processProductBatch(productIds, batchSize = 5) {
+async function processProductBatch(productIds, batchSize = 10) {
   const results = [];
 
   for (let i = 0; i < productIds.length; i += batchSize) {
     const batch = productIds.slice(i, i + batchSize);
-    const batchResults = await Promise.allSettled(batch.map(fetchProductDetails));
+    const batchPromises = batch.map((id) => fetchProductDetails(id));
+    const batchResults = await Promise.allSettled(batchPromises);
 
-    batchResults.forEach((res) => {
-      if (res.status === "fulfilled" && res.value) {
-        const p = res.value;
+    batchResults.forEach((result) => {
+      if (result.status === "fulfilled" && result.value) {
+        const p = result.value;
         results.push({
           productUrl: p.productUrl,
           images: p.images,
@@ -138,35 +152,42 @@ async function processProductBatch(productIds, batchSize = 5) {
   return results;
 }
 
-export async function GET(req) {
+export async function GET(request) {
   try {
-    const { searchParams } = new URL(req.url);
+    const { searchParams } = new URL(request.url);
     const page = parseInt(searchParams.get("page") || "1");
-    const limit = parseInt(searchParams.get("limit") || "10");
+    const limit = parseInt(searchParams.get("limit") || "20");
+    const startIndex = (page - 1) * limit;
+    const endIndex = startIndex + limit;
 
-    const allIds = await scrapeOneListingPage(page);
-    const paginatedIds = allIds.slice(0, limit);
-    const products = await processProductBatch(paginatedIds, 5);
+    const allProductIds = await scrapeAllListingPages();
+    if (allProductIds.length === 0) throw new Error("No product IDs found");
 
-    return new Response(
-      JSON.stringify({
-        products,
-        pagination: {
-          page,
-          limit,
-          totalFound: allIds.length,
-          totalPages: Math.ceil(allIds.length / limit),
-        },
-      }),
-      {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      }
-    );
-  } catch (err) {
-    return new Response(
-      JSON.stringify({ error: err.message }),
-      { status: 500, headers: { "Content-Type": "application/json" } }
-    );
+    const paginatedProductIds = allProductIds.slice(startIndex, endIndex);
+    const products = await processProductBatch(paginatedProductIds);
+
+    return new Response(JSON.stringify({
+      products,
+      pagination: {
+        page,
+        limit,
+        totalProducts: allProductIds.length,
+        totalPages: Math.ceil(allProductIds.length / limit),
+        hasNextPage: endIndex < allProductIds.length,
+        hasPrevPage: page > 1,
+      },
+    }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    });
+  } catch (error) {
+    console.error("Error scraping products:", error.message);
+    return new Response(JSON.stringify({
+      error: "Failed to fetch products",
+      details: error.message,
+    }), {
+      status: 500,
+      headers: { "Content-Type": "application/json" },
+    });
   }
 }
