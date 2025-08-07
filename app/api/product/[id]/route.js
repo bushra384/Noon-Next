@@ -2,7 +2,7 @@ import axios from 'axios';
 import * as cheerio from 'cheerio';
 
 export async function GET(request, { params }) {
-  const { id } = params;
+  const { id } = await params;
   
   try {
     // Construct the product URL
