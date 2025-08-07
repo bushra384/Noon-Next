@@ -3,16 +3,8 @@ import * as cheerio from "cheerio";
 async function fetchProductDetails(productId) {
   try {
     const productUrl = `https://minutes.noon.com/uae-en/now-product/${productId}/`;
-    const response = await fetch(productUrl, {
-      headers: {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-        "Accept": "application/json",
-        "Accept-Language": "en-US,en;q=0.9",
-        "Referer": "https://minutes.noon.com/",
-        "Origin": "https://minutes.noon.com",
-      }      
-    });
-
+    const response = await fetch(productUrl);
+    console.log(">>>> Debug response1:", response);
     const data = await response.text();
     const $ = cheerio.load(data);
 
@@ -100,15 +92,8 @@ async function scrapeAllListingPages() {
   for (let page = 1; page <= totalPages; page++) {
     try {
       const listingUrl = `https://minutes.noon.com/uae-en/search/?f[category]=fruits_vegetables&page=${page}`;
-      const response = await fetch(listingUrl, {
-        headers: {
-          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-          "Accept": "application/json",
-          "Accept-Language": "en-US,en;q=0.9",
-          "Referer": "https://minutes.noon.com/",
-          "Origin": "https://minutes.noon.com",
-        },
-      });
+      const response = await fetch(listingUrl);
+      console.log(">>>> Debug response:", response);
       const data = await response.text();
       const $ = cheerio.load(data);
 
