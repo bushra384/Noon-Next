@@ -1,12 +1,22 @@
+// app/api/products/route.js
 import * as cheerio from "cheerio";
+
+// Add headers to avoid being blocked
+const fetchWithHeaders = async (url) => {
+  return await fetch(url, {
+    headers: {
+      "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
+    },
+  });
+};
 
 async function fetchProductDetails(productId) {
   try {
     const productUrl = `https://minutes.noon.com/uae-en/now-product/${productId}/`;
-    const response = await fetch(productUrl);
-    console.log(">>>> Debug response1:", response);
-    const data = await response.text();
-    const $ = cheerio.load(data);
+    const response = await fetchWithHeaders(productUrl);
+    const html = await response.text();
+    const $ = cheerio.load(html);
 
     const productInfo = {
       productId,
@@ -27,7 +37,7 @@ async function fetchProductDetails(productId) {
         if (text.includes("'s")) {
           const parts = text.split("'s");
           productInfo.brand = parts[0].trim();
-          productInfo.productName = parts[1] ? parts[1].trim() : text;
+          productInfo.productName = parts[1]?.trim() || text;
         } else {
           productInfo.productName = text;
         }
@@ -35,7 +45,7 @@ async function fetchProductDetails(productId) {
     });
 
     const priceElement = $('span:contains("AED"), span:contains("\u062f.\u0625"), span')
-      .filter((i, el) => $(el).text().trim().match(/^(AED|\u062f\.\u0625)?\s*\d+(\.\d+)?/))
+      .filter((_, el) => $(el).text().trim().match(/^(AED|\u062f\.\u0625)?\s*\d+(\.\d+)?/))
       .first();
 
     if (priceElement.length) {
@@ -50,28 +60,28 @@ async function fetchProductDetails(productId) {
       }
     }
 
-    $('[class*="size"], [class*="weight"], [class*="quantity"]').each((i, el) => {
+    $('[class*="size"], [class*="weight"], [class*="quantity"]').each((_, el) => {
       const text = $(el).text().trim();
       if (text && /g|kg|Punnet/.test(text)) {
         productInfo.size = text;
       }
     });
 
-    $('img[src*="nooncdn.com"]').each((i, el) => {
+    $('img[src*="nooncdn.com"]').each((_, el) => {
       const src = $(el).attr("src");
       if (src && !src.includes("svg") && !src.includes("data:")) {
         productInfo.images.push(src);
       }
     });
 
-    $('[class*="origin"], [class*="country"]').each((i, el) => {
+    $('[class*="origin"], [class*="country"]').each((_, el) => {
       const text = $(el).text().trim();
       if (text && !productInfo.origin) {
         productInfo.origin = text;
       }
     });
 
-    $('[class*="description"], [class*="desc"], p').each((i, el) => {
+    $('[class*="description"], [class*="desc"], p').each((_, el) => {
       const text = $(el).text().trim();
       if (text.length > 50 && !productInfo.description) {
         productInfo.description = text;
@@ -79,48 +89,39 @@ async function fetchProductDetails(productId) {
     });
 
     return productInfo;
-  } catch (error) {
-    console.error(`Error fetching product details for ${productId}:`, error.message);
+  } catch (err) {
+    console.error("fetchProductDetails error:", err.message);
     return null;
   }
 }
 
-async function scrapeAllListingPages() {
-  const allProductIds = new Set();
-  const totalPages = 5;
+async function scrapeOneListingPage(page = 1) {
+  const url = `https://minutes.noon.com/uae-en/search/?f[category]=fruits_vegetables&page=${page}`;
+  const response = await fetchWithHeaders(url);
+  const html = await response.text();
+  const $ = cheerio.load(html);
 
-  for (let page = 1; page <= totalPages; page++) {
-    try {
-      const listingUrl = `https://minutes.noon.com/uae-en/search/?f[category]=fruits_vegetables&page=${page}`;
-      const response = await fetch(listingUrl);
-      console.log(">>>> Debug response:", response);
-      const data = await response.text();
-      const $ = cheerio.load(data);
+  const productIds = new Set();
 
-      $('a[href*="/now-product/"]').each((_, el) => {
-        const href = $(el).attr("href");
-        const match = href.match(/\/now-product\/([^\/]+)/);
-        if (match) allProductIds.add(match[1]);
-      });
-    } catch (error) {
-      console.error(`Error scraping page ${page}:`, error);
-    }
-  }
+  $('a[href*="/now-product/"]').each((_, el) => {
+    const href = $(el).attr("href");
+    const match = href?.match(/\/now-product\/([^\/]+)/);
+    if (match) productIds.add(match[1]);
+  });
 
-  return Array.from(allProductIds);
+  return Array.from(productIds);
 }
 
-async function processProductBatch(productIds, batchSize = 10) {
+async function processProductBatch(productIds, batchSize = 5) {
   const results = [];
 
   for (let i = 0; i < productIds.length; i += batchSize) {
     const batch = productIds.slice(i, i + batchSize);
-    const batchPromises = batch.map((id) => fetchProductDetails(id));
-    const batchResults = await Promise.allSettled(batchPromises);
+    const batchResults = await Promise.allSettled(batch.map(fetchProductDetails));
 
-    batchResults.forEach((result) => {
-      if (result.status === "fulfilled" && result.value) {
-        const p = result.value;
+    batchResults.forEach((res) => {
+      if (res.status === "fulfilled" && res.value) {
+        const p = res.value;
         results.push({
           productUrl: p.productUrl,
           images: p.images,
@@ -137,42 +138,35 @@ async function processProductBatch(productIds, batchSize = 10) {
   return results;
 }
 
-export async function GET(request) {
+export async function GET(req) {
   try {
-    const { searchParams } = new URL(request.url);
-    const page = parseInt(searchParams.get("page")) || 1;
-    const limit = parseInt(searchParams.get("limit")) || 20;
-    const startIndex = (page - 1) * limit;
-    const endIndex = startIndex + limit;
+    const { searchParams } = new URL(req.url);
+    const page = parseInt(searchParams.get("page") || "1");
+    const limit = parseInt(searchParams.get("limit") || "10");
 
-    const allProductIds = await scrapeAllListingPages();
-    if (allProductIds.length === 0) throw new Error("No product IDs found");
+    const allIds = await scrapeOneListingPage(page);
+    const paginatedIds = allIds.slice(0, limit);
+    const products = await processProductBatch(paginatedIds, 5);
 
-    const paginatedProductIds = allProductIds.slice(startIndex, endIndex);
-    const products = await processProductBatch(paginatedProductIds);
-
-    return new Response(JSON.stringify({
-      products,
-      pagination: {
-        page,
-        limit,
-        totalProducts: allProductIds.length,
-        totalPages: Math.ceil(allProductIds.length / limit),
-        hasNextPage: endIndex < allProductIds.length,
-        hasPrevPage: page > 1,
-      },
-    }), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    });
-  } catch (error) {
-    console.error("Error scraping products:", error.message);
-    return new Response(JSON.stringify({
-      error: "Failed to fetch products",
-      details: error.message,
-    }), {
-      status: 500,
-      headers: { "Content-Type": "application/json" },
-    });
+    return new Response(
+      JSON.stringify({
+        products,
+        pagination: {
+          page,
+          limit,
+          totalFound: allIds.length,
+          totalPages: Math.ceil(allIds.length / limit),
+        },
+      }),
+      {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }
+    );
+  } catch (err) {
+    return new Response(
+      JSON.stringify({ error: err.message }),
+      { status: 500, headers: { "Content-Type": "application/json" } }
+    );
   }
 }
