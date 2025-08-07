@@ -1,91 +1,60 @@
-import axios from 'axios';
+// app/api/product-details/[id]/route.js
 import * as cheerio from 'cheerio';
 
+const API_KEY = process.env.SCRAPING_BEE_KEY;
+
 export async function GET(request, { params }) {
-  const { id } = await params;
-  
+  const { id } = params;
+
   try {
-    // Construct the product URL
     const productUrl = `https://minutes.noon.com/uae-en/now-product/${id}/`;
-    
     console.log(`Scraping product details from: ${productUrl}`);
-    
-    // const { data } = await axios.get(productUrl, {
-    //   headers: { 
-    //     'User-Agent': 'Mozilla/5.0',
-    //     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-    //     'Accept-Language': 'en-US,en;q=0.5',
-    //     'Accept-Encoding': 'gzip, deflate, br',
-    //     'Connection': 'keep-alive',
-    //     'Upgrade-Insecure-Requests': '1',
-    //   }
-    // });
 
-    const response = await fetch(productUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0',
-        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-        'Accept-Language': 'en-US,en;q=0.5',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1',
-      }
-    });
-    const data = await response.text(); 
+    // Use ScrapingBee API
+    const scrapingBeeUrl = `https://app.scrapingbee.com/api/v1/?api_key=${API_KEY}&url=${encodeURIComponent(productUrl)}&render_js=false&block_resources=true`;
+    const response = await fetch(scrapingBeeUrl);
+    if (!response.ok) throw new Error(`ScrapingBee failed: ${response.status}`);
 
+    const data = await response.text();
     const $ = cheerio.load(data);
-    
-    // Extract product details
+
     const productDetails = {
-      // Basic product info
       brand: '',
       productName: '',
       size: '',
       price: '',
       currency: '',
-      
-      // Delivery info
       deliveryTime: '',
-      
-      // Promotional info
       combosAvailable: false,
       comboText: '',
-      
-      // Description and features
       description: '',
       features: [],
-      
-      // Images
       images: [],
-      
-      // Additional info
       origin: '',
       sku: id
     };
 
-    // Extract brand and product name
+    // Title
     $('h1, .product-title, [data-testid*="title"]').each((i, el) => {
       const text = $(el).text().trim();
       if (text && !productDetails.productName) {
-        // Try to separate brand and product name
         if (text.includes("'s")) {
           const parts = text.split("'s");
           productDetails.brand = parts[0].trim();
-          productDetails.productName = parts[1] ? parts[1].trim() : text;
+          productDetails.productName = parts[1]?.trim() || text;
         } else {
           productDetails.productName = text;
         }
       }
     });
 
-    // Extract price
+    // Price
     $('[class*="price"], .price, [data-testid*="price"]').each((i, el) => {
       const text = $(el).text().trim();
       if (text && text.match(/[\d.,]+/)) {
         const priceMatch = text.match(/[\d.,]+/);
         if (priceMatch) {
           productDetails.price = priceMatch[0];
-          // Extract currency symbol
           const currencyMatch = text.match(/[^\d.,\s]+/);
           if (currencyMatch) {
             productDetails.currency = currencyMatch[0];
@@ -94,7 +63,7 @@ export async function GET(request, { params }) {
       }
     });
 
-    // Extract size/quantity
+    // Size
     $('[class*="size"], [class*="weight"], [class*="quantity"]').each((i, el) => {
       const text = $(el).text().trim();
       if (text && (text.includes('g') || text.includes('kg') || text.includes('Punnet'))) {
@@ -102,79 +71,72 @@ export async function GET(request, { params }) {
       }
     });
 
-    // Extract delivery time
+    // Delivery
     $('[class*="delivery"], [class*="arrives"]').each((i, el) => {
       const text = $(el).text().trim();
-      if (text && text.includes('mins')) {
+      if (text.includes('mins')) {
         const timeMatch = text.match(/(\d+)\s*mins/);
-        if (timeMatch) {
-          productDetails.deliveryTime = `${timeMatch[1]} mins`;
-        }
+        if (timeMatch) productDetails.deliveryTime = `${timeMatch[1]} mins`;
       }
     });
 
-    // Extract combo information
+    // Combo info
     $('[class*="combo"], [class*="promotion"]').each((i, el) => {
       const text = $(el).text().trim();
-      if (text && text.toLowerCase().includes('combo')) {
+      if (text.toLowerCase().includes('combo')) {
         productDetails.combosAvailable = true;
         productDetails.comboText = text;
       }
     });
 
-    // Extract description and features using improved logic
+    // Description + Features (multi-approach)
     let desc = null;
     let features = [];
 
-    // 1. Try with original selector (Horilla-like structure)
+    // 1. Horilla-style container
     const mainDescDiv = $('body > div.layout_pageWrapper__W_ZgS > div:nth-child(2) > div:nth-child(4)');
     if (mainDescDiv.length) {
       desc = mainDescDiv.text().trim();
       const ul = mainDescDiv.find('ul');
       if (ul.length) {
-        features = ul.find('li').map((i, li) => $(li).text().trim()).get();
+        features = ul.find('li').map((_, li) => $(li).text().trim()).get();
       }
     }
 
-    // 2. Fallback to older style (description and features in styled div)
+    // 2. Alternative styled div
     if (!desc || features.length === 0) {
-      $("div[style*='margin-top: 20px'][style*='color: rgb(126, 133, 155)']").each((i, div) => {
+      $("div[style*='margin-top: 20px'][style*='color: rgb(126, 133, 155)']").each((_, div) => {
         const p = $(div).find('p').first();
-        if (p.length) desc = p.text().trim();
-        else desc = $(div).text().trim();
-
-        // Append any <li> inside this block
-        const localFeatures = $(div).find('li').map((i, li) => $(li).text().trim()).get();
+        desc = p.length ? p.text().trim() : $(div).text().trim();
+        const localFeatures = $(div).find('li').map((_, li) => $(li).text().trim()).get();
         if (localFeatures.length) features = localFeatures;
-
-        if (desc) return false; // Break loop
+        if (desc) return false; // break
       });
     }
 
-    // 3. Last resort: heuristic description
+    // 3. Heuristic fallback
     if (!desc) {
-      $('div').each((i, div) => {
+      $('div').each((_, div) => {
         const t = $(div).text().trim();
-        if (t && t.length > 30 && t.toLowerCase().includes('fruit')) {
+        if (t.length > 30 && t.toLowerCase().includes('fruit')) {
           desc = t;
           return false;
         }
       });
     }
 
-    // 4. Final fallback for features: find first <ul> in body
+    // 4. Last feature fallback
     if (features.length === 0) {
       const ul = $('ul').first();
       if (ul.length) {
-        features = ul.find('li').map((i, li) => $(li).text().trim()).get();
+        features = ul.find('li').map((_, li) => $(li).text().trim()).get();
       }
     }
 
-    // Update product details with extracted description and features
     productDetails.description = desc || '';
     productDetails.features = features;
 
-    // Extract images
+    // Images
     $('img[src*="nooncdn.com"]').each((i, el) => {
       const src = $(el).attr('src');
       if (src && !src.includes('svg')) {
@@ -182,7 +144,7 @@ export async function GET(request, { params }) {
       }
     });
 
-    // Extract origin/country
+    // Origin
     $('[class*="origin"], [class*="country"]').each((i, el) => {
       const text = $(el).text().trim();
       if (text && !productDetails.origin) {
@@ -190,7 +152,7 @@ export async function GET(request, { params }) {
       }
     });
 
-    // If no specific origin found, try to extract from description
+    // Fallback origin from description
     if (!productDetails.origin && productDetails.description) {
       const originMatch = productDetails.description.match(/from\s+([A-Za-z]+)/);
       if (originMatch) {
@@ -206,12 +168,12 @@ export async function GET(request, { params }) {
     });
   } catch (error) {
     console.error('Error scraping product details:', error.message);
-    return new Response(JSON.stringify({ 
+    return new Response(JSON.stringify({
       error: 'Failed to fetch product details',
-      details: error.message 
+      details: error.message
     }), {
       status: 500,
       headers: { 'Content-Type': 'application/json' },
     });
   }
-} 
+}
