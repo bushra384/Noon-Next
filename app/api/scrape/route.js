@@ -3,24 +3,84 @@ import * as cheerio from "cheerio";
 async function fetchProductDetails(productId) {
   try {
     const productUrl = `https://minutes.noon.com/uae-en/now-product/${productId}/`;
-    // It's a good practice to use a custom User-Agent 
-    const response = await fetch(productUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.110 Safari/537.36',
-      },
-    });
-
-    if (!response.ok) {
-      console.error(`Error fetching product details for ${productId}: ${response.statusText}`);
-      return null;
-    }
-
+    const response = await fetch(productUrl);
+    console.log(">>>> Debug response1:", response);
     const data = await response.text();
     const $ = cheerio.load(data);
 
-    // ... (rest of your scraping logic for a single product) 
+    const productInfo = {
+      productId,
+      productUrl,
+      images: [],
+      productName: "",
+      brand: "",
+      price: "",
+      currency: "",
+      size: "",
+      origin: "",
+      description: "",
+    };
+
+    $('h1, .product-title, [data-testid*="title"]').each((i, el) => {
+      const text = $(el).text().trim();
+      if (text && !productInfo.productName) {
+        if (text.includes("'s")) {
+          const parts = text.split("'s");
+          productInfo.brand = parts[0].trim();
+          productInfo.productName = parts[1] ? parts[1].trim() : text;
+        } else {
+          productInfo.productName = text;
+        }
+      }
+    });
+
+    const priceElement = $('span:contains("AED"), span:contains("\u062f.\u0625"), span')
+      .filter((i, el) => $(el).text().trim().match(/^(AED|\u062f\.\u0625)?\s*\d+(\.\d+)?/))
+      .first();
+
+    if (priceElement.length) {
+      const text = priceElement.text().trim();
+      const priceMatch = text.match(/[\d.,]+/);
+      if (priceMatch) {
+        productInfo.price = priceMatch[0];
+        const currencyMatch = text.match(/[^\d.,\s]+/);
+        if (currencyMatch) {
+          productInfo.currency = currencyMatch[0];
+        }
+      }
+    }
+
+    $('[class*="size"], [class*="weight"], [class*="quantity"]').each((i, el) => {
+      const text = $(el).text().trim();
+      if (text && /g|kg|Punnet/.test(text)) {
+        productInfo.size = text;
+      }
+    });
+
+    $('img[src*="nooncdn.com"]').each((i, el) => {
+      const src = $(el).attr("src");
+      if (src && !src.includes("svg") && !src.includes("data:")) {
+        productInfo.images.push(src);
+      }
+    });
+
+    $('[class*="origin"], [class*="country"]').each((i, el) => {
+      const text = $(el).text().trim();
+      if (text && !productInfo.origin) {
+        productInfo.origin = text;
+      }
+    });
+
+    $('[class*="description"], [class*="desc"], p').each((i, el) => {
+      const text = $(el).text().trim();
+      if (text.length > 50 && !productInfo.description) {
+        productInfo.description = text;
+      }
+    });
+
+    return productInfo;
   } catch (error) {
-    console.error(`Error in fetchProductDetails for ${productId}:`, error.message);
+    console.error(`Error fetching product details for ${productId}:`, error.message);
     return null;
   }
 }
