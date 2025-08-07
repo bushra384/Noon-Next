@@ -129,18 +129,21 @@ async function scrapeAllListingPages() {
       const listingUrl = `https://minutes.noon.com/uae-en/search/?f[category]=fruits_vegetables&page=${page}`;
       console.log(`Scraping listing page ${page}...`);
 
-      const { data } = await axios.get(listingUrl, {
-        headers: {
-          "User-Agent": "Mozilla/5.0",
-          Accept:
-            "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
-          "Accept-Language": "en-US,en;q=0.5",
-          "Accept-Encoding": "gzip, deflate, br",
-          Connection: "keep-alive",
-          "Upgrade-Insecure-Requests": "1",
-        },
-        timeout: 15000,
-      });
+      // const { data } = await axios.get(listingUrl, {
+      //   headers: {
+      //     "User-Agent": "Mozilla/5.0",
+      //     Accept:
+      //       "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+      //     "Accept-Language": "en-US,en;q=0.5",
+      //     "Accept-Encoding": "gzip, deflate, br",
+      //     Connection: "keep-alive",
+      //     "Upgrade-Insecure-Requests": "1",
+      //   },
+      //   timeout: 15000,
+      // });
+
+      const response = await fetch(listingUrl);
+      const data = await response.text();
 
       const $ = cheerio.load(data);
 
