@@ -1,7 +1,7 @@
 // app/api/product-details/[id]/route.js
 import * as cheerio from 'cheerio';
 
-const API_KEY = process.env.SCRAPING_BEE_KEY;
+const API_KEY = "K6EQ1YS3N0UTBMNE0BD93DO6JULUSAX9PWHYAXFW19DRJTH6HNXVQZ0OWLREW2D0GYQB10T8MPPYGL0Y";
 
 export async function GET(request, { params }) {
   const { id } = params;
